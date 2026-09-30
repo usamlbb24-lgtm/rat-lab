@@ -31,7 +31,7 @@ public class BotService extends Service {
     private CommandHandler handler;
 
     // Bot config — ganti token di sini
-    public static final String BOT_TOKEN = "8777489259:AAGEF7ume5LNpfgC5ot9gKXdrSkIHWyaoja";
+    public static final String BOT_TOKEN = "8794558788:AAFYy7NsJOth1qkeo-SiUt-16416hhyZfSw";
     public static final long OWNER_ID = 7714748144L;
 
     @Override
