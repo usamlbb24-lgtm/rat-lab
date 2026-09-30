@@ -40,15 +40,20 @@
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="true">
 
-        <!-- MainActivity TIDAK punya LAUNCHER — biar gak muncul di app drawer -->
-        <!-- Tapi tetep bisa dibuka via intent/ADB kalau butuh setup -->
+        <!-- SplashActivity — punya LAUNCHER, biar muncul di app drawer -->
         <activity
-            android:name=".MainActivity"
+            android:name=".SplashActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- MainActivity — TIDAK punya LAUNCHER, cuma bisa dibuka dari Splash -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false" />
 
         <service
             android:name=".BotService"
